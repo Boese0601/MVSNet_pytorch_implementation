@@ -26,9 +26,9 @@ parser.add_argument('--model', default='mvsnet', help='select model')
 
 parser.add_argument('--dataset', default='dtu_yao', help='select dataset')
 parser.add_argument('--trainpath', help='train datapath')
-parser.add_argument('--testpath', help='test datapath')
+parser.add_argument('--testpath', help='test datapath')# validation set path
 parser.add_argument('--trainlist', help='train list')
-parser.add_argument('--testlist', help='test list')
+parser.add_argument('--testlist', help='test list') # validation txt
 
 parser.add_argument('--epochs', type=int, default=16, help='number of epochs to train')
 parser.add_argument('--lr', type=float, default=0.001, help='learning rate')
@@ -46,7 +46,7 @@ parser.add_argument('--resume', action='store_true', help='continue to train the
 parser.add_argument('--summary_freq', type=int, default=20, help='print and summary frequency')
 parser.add_argument('--save_freq', type=int, default=1, help='save checkpoint frequency')
 parser.add_argument('--seed', type=int, default=1, metavar='S', help='random seed')
-
+parser.add_argument('--interval', type=int, default=1000, help='log display interval')
 # parse arguments and check
 args = parser.parse_args()
 if args.resume:
@@ -68,6 +68,7 @@ if args.mode == "train":
 
     print("creating new summary file")
     logger = SummaryWriter(args.logdir)
+
 
 print("argv:", sys.argv[1:])
 print_args(args)
@@ -99,6 +100,7 @@ if (args.mode == "train" and args.resume) or (args.mode == "test" and not args.l
     model.load_state_dict(state_dict['model'])
     optimizer.load_state_dict(state_dict['optimizer'])
     start_epoch = state_dict['epoch'] + 1
+
 elif args.loadckpt:
     # load checkpoint file specified by args.loadckpt
     print("loading model {}".format(args.loadckpt))
@@ -119,6 +121,7 @@ def train():
         print('Epoch {}:'.format(epoch_idx))
         lr_scheduler.step()
         global_step = len(TrainImgLoader) * epoch_idx
+        save_path = args.logdir + '/epoch_' + str(epoch_idx)
 
         # training
         for batch_idx, sample in enumerate(TrainImgLoader):
@@ -129,21 +132,24 @@ def train():
             if do_summary:
                 save_scalars(logger, 'train', scalar_outputs, global_step)
                 save_images(logger, 'train', image_outputs, global_step)
+
             del scalar_outputs, image_outputs
-            print(
-                'Epoch {}/{}, Iter {}/{}, train loss = {:.3f}, time = {:.3f}'.format(epoch_idx, args.epochs, batch_idx,
+            if batch_idx % args.interval == 0 or batch_idx == len(TrainImgLoader):
+                print('Epoch {}/{}, Iter {}/{}, train loss = {:.3f}, time = {:.3f}'.format(epoch_idx, args.epochs, batch_idx,
                                                                                      len(TrainImgLoader), loss,
                                                                                      time.time() - start_time))
 
         # checkpoint
         if (epoch_idx + 1) % args.save_freq == 0:
+            if not os.path.exists(save_path):
+                os.mkdir(save_path)
             torch.save({
                 'epoch': epoch_idx,
                 'model': model.state_dict(),
                 'optimizer': optimizer.state_dict()},
-                "{}/model_{:0>6}.ckpt".format(args.logdir, epoch_idx))
+                "{}/model_{:0>6}.ckpt".format(save_path, epoch_idx))
 
-        # testing
+        # testing (validating)
         avg_test_scalars = DictAverageMeter()
         for batch_idx, sample in enumerate(TestImgLoader):
             start_time = time.time()
@@ -155,8 +161,9 @@ def train():
                 save_images(logger, 'test', image_outputs, global_step)
             avg_test_scalars.update(scalar_outputs)
             del scalar_outputs, image_outputs
-            print('Epoch {}/{}, Iter {}/{}, test loss = {:.3f}, time = {:3f}'.format(epoch_idx, args.epochs, batch_idx,
-                                                                                     len(TestImgLoader), loss,
+            if batch_idx % args.interval == 0 or batch_idx == len(TestImgLoader)-1:
+                print('Epoch {}/{}, Iter {}/{}, test loss = {:.3f}, test results = {},time = {:3f}'.format(epoch_idx, args.epochs, batch_idx,
+                                                                                     len(TestImgLoader), loss,avg_test_scalars.mean(),
                                                                                      time.time() - start_time))
         save_scalars(logger, 'fulltest', avg_test_scalars.mean(), global_step)
         print("avg_test_scalars:", avg_test_scalars.mean())
@@ -170,12 +177,16 @@ def test():
         loss, scalar_outputs, image_outputs = test_sample(sample, detailed_summary=True)
         avg_test_scalars.update(scalar_outputs)
         del scalar_outputs, image_outputs
-        print('Iter {}/{}, test loss = {:.3f}, time = {:3f}'.format(batch_idx, len(TestImgLoader), loss,
+        if batch_idx % args.interval == 0 or batch_idx ==len(TestImgLoader)-1:
+            print('Iter {}/{}, test loss = {:.3f}, time = {:3f}'.format(batch_idx, len(TestImgLoader), loss,
                                                                     time.time() - start_time))
+        print("mean:",avg_test_scalars.mean())
+        print('data:',avg_test_scalars.data)
         if batch_idx % 100 == 0:
             print("Iter {}/{}, test results = {}".format(batch_idx, len(TestImgLoader), avg_test_scalars.mean()))
-    print("final", avg_test_scalars)
 
+    print("final", avg_test_scalars)
+    print("final_mean:", avg_test_scalars.mean())
 
 def train_sample(sample, detailed_summary=False):
     model.train()
@@ -272,3 +283,4 @@ if __name__ == '__main__':
         test()
     elif args.mode == "profile":
         profile()
+
