@@ -69,6 +69,11 @@ if args.mode == "train":
     print("creating new summary file")
     logger = SummaryWriter(args.logdir)
 
+if args.mode == "test":
+    current_time_str =str(datetime.datetime.now().strftime('%Y%m%d_%H%M%S'))
+    print("current time", current_time_str)
+    logger_test = SummaryWriter(args.logdir)
+
 print("argv:", sys.argv[1:])
 print_args(args)
 
@@ -165,9 +170,15 @@ def train():
 
 def test():
     avg_test_scalars = DictAverageMeter()
+    global_step = len(TestImgLoader) * 0
     for batch_idx, sample in enumerate(TestImgLoader):
         start_time = time.time()
+        global_step = len(TrainImgLoader) * 0 + batch_idx
+        do_summary = global_step % args.summary_freq == 0
         loss, scalar_outputs, image_outputs = test_sample(sample, detailed_summary=True)
+        if do_summary:
+            save_scalars(logger_test, 'test', scalar_outputs, global_step)
+            save_images(logger_test, 'test', image_outputs, global_step)
         avg_test_scalars.update(scalar_outputs)
         del scalar_outputs, image_outputs
         print('Iter {}/{}, test loss = {:.3f}, time = {:3f}'.format(batch_idx, len(TestImgLoader), loss,
@@ -176,8 +187,10 @@ def test():
         print('data:',avg_test_scalars.data)
         if batch_idx % 100 == 0:
             print("Iter {}/{}, test results = {}".format(batch_idx, len(TestImgLoader), avg_test_scalars.mean()))
-
+    save_scalars(logger_test, 'fulltest', avg_test_scalars.mean(), global_step)
     print("final", avg_test_scalars)
+    print('final_data:',avg_test_scalars.data)
+    print('count:',avg_test_scalars.count)
     print("final_mean:", avg_test_scalars.mean())
 
 def train_sample(sample, detailed_summary=False):
